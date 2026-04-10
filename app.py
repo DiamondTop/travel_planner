@@ -36,8 +36,9 @@ class OutlookManager:
         redirect_uri = "http://localhost:8501/"
         scope = "Mail.Read User.Read offline_access"
 
+        
         auth_url = (
-            f"https://login.microsoftonline.com/common/oauth2/v2.0/authorize?"
+            f"https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?"
             f"client_id={self.client_id}&"
             f"response_type=code&"
             f"redirect_uri={redirect_uri}&"
@@ -52,8 +53,8 @@ class OutlookManager:
             return False
 
         redirect_uri = "http://localhost:8501/"
-
-        token_url = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+        token_url = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
+        
 
         data = {
             "client_id": self.client_id,
