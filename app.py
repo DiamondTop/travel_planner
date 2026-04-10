@@ -3,6 +3,11 @@ import pandas as pd
 from datetime import datetime, date, time
 from typing import List, Dict, Optional
 import json
+import re
+import requests
+
+# Microsoft Authentication Library
+import msal
 
 # ============================================
 # CONFIGURATION
@@ -12,6 +17,201 @@ st.set_page_config(
     page_icon="✈️",
     layout="wide"
 )
+
+# ============================================
+# OUTLOOK INTEGRATION CLASS
+# ============================================
+class OutlookManager:
+    def __init__(self):
+        self.client_id = None
+        self.tenant_id = "common"  # Use "common" for multi-tenant
+        self.authority = f"https://login.microsoftonline.com/{self.tenant_id}"
+        self.scopes = ["Mail.Read", "User.Read"]
+        self.app = None
+        self.access_token = None
+
+    def configure(self, client_id: str):
+        """Initialize MSAL app"""
+        self.client_id = client_id
+        self.app = msal.PublicClientApplication(
+            self.client_id,
+            authority=self.authority
+        )
+
+    def get_token_interactive(self):
+        """Get token via interactive login (opens browser)"""
+        if not self.app:
+            st.error("Please configure client ID first")
+            return None
+
+        # Try to get token from cache
+        accounts = self.app.get_accounts()
+        if accounts:
+            result = self.app.acquire_token_silent(
+                self.scopes,
+                account=accounts[0]
+            )
+            if result:
+                return result["access_token"]
+
+        # If no cached token, do interactive login
+        result = self.app.initiate_device_flow(scopes=self.scopes)
+
+        if "user_code" in result:
+            st.markdown(f"""
+            ### 🔐 Login Required
+            1. Go to: [https://microsoft.com/devicelogin](https://microsoft.com/devicelogin)
+            2. Enter code: **{result["user_code"]}**
+            3. Sign in with your Outlook account
+            """)
+
+            # Wait for token
+            with st.spinner("Waiting for login..."):
+                while True:
+                    result = self.app.acquire_token_by_device_flow(result)
+                    if "access_token" in result:
+                        return result["access_token"]
+                    elif "error" in result:
+                        st.error(f"Login failed: {result.get('error_description', 'Unknown error')}")
+                        return None
+
+    def fetch_emails(self, search_query: str = None) -> List[Dict]:
+        """Fetch emails from Outlook"""
+        if not self.access_token:
+            return []
+
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+
+        # Build query
+        if search_query:
+            filter_query = f"$filter=subject eq '{search_query}'"
+        else:
+            filter_query = ""
+
+        # Get emails (limit to recent 50)
+        endpoint = f"https://graph.microsoft.com/v1.0/me/messages?$top=50"
+
+        try:
+            response = requests.get(endpoint, headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("value", [])
+            else:
+                st.error(f"Error fetching emails: {response.status_code}")
+                return []
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+            return []
+
+    def extract_travel_info(self, emails: List[Dict]) -> Dict:
+        """Extract flight, hotel, tour info from emails"""
+        flights = []
+        hotels = []
+        tours = []
+
+        # Keywords to search
+        flight_keywords = ["flight", "airline", "boarding", "departure", "arrival"]
+        hotel_keywords = ["hotel", "accommodation", "check-in", "check-out", "reservation"]
+        tour_keywords = ["tour", "excursion", "activity", "ticket", "admission"]
+
+        for email in emails:
+            subject = email.get("subject", "").lower()
+            body = email.get("body", {}).get("content", "").lower()
+            text = subject + " " + body
+
+            # Extract flight info
+            if any(kw in text for kw in flight_keywords):
+                flight_info = self._parse_flight_email(email)
+                if flight_info:
+                    flights.append(flight_info)
+
+            # Extract hotel info
+            elif any(kw in text for kw in hotel_keywords):
+                hotel_info = self._parse_hotel_email(email)
+                if hotel_info:
+                    hotels.append(hotel_info)
+
+            # Extract tour info
+            elif any(kw in text for kw in tour_keywords):
+                tour_info = self._parse_tour_email(email)
+                if tour_info:
+                    tours.append(tour_info)
+
+        return {
+            "flights": flights,
+            "hotels": hotels,
+            "tours": tours
+        }
+
+    def _parse_flight_email(self, email: str) -> Optional[Dict]:
+        """Parse flight confirmation from email"""
+        text = email.get("subject", "") + " " + email.get("body", {}).get("content", "")
+
+        # Extract flight number (e.g., UA1234, AA567)
+        flight_match = re.search(r'([A-Z]{2}\d{3,4})', text)
+        flight_number = flight_match.group(1) if flight_match else "Unknown"
+
+        # Extract date
+        date_match = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4})', text)
+        flight_date = date_match.group(1) if date_match else ""
+
+        # Extract confirmation
+        conf_match = re.search(r'confirmation[:\s]*([A-Z0-9]{5,})', text, re.IGNORECASE)
+        confirmation = conf_match.group(1) if conf_match else ""
+
+        return {
+            "airline": "Extracted",
+            "flight_number": flight_number,
+            "date": flight_date,
+            "confirmation": confirmation,
+            "subject": email.get("subject", "")
+        }
+
+    def _parse_hotel_email(self, email: Dict) -> Optional[Dict]:
+        """Parse hotel confirmation from email"""
+        text = email.get("subject", "") + " " + email.get("body", {}).get("content", "")
+
+        # Extract hotel name (often in subject)
+        hotel_name = email.get("subject", "").replace("Confirmation", "").replace("Booking", "").strip()
+
+        # Extract dates
+        date_match = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4})\s*[-to]+\s*(\d{1,2}/\d{1,2}/\d{2,4})', text)
+        check_in = date_match.group(1) if date_match else ""
+        check_out = date_match.group(2) if date_match else ""
+
+        # Extract confirmation
+        conf_match = re.search(r'confirmation[:\s]*([A-Z0-9]{5,})', text, re.IGNORECASE)
+        confirmation = conf_match.group(1) if conf_match else ""
+
+        return {
+            "hotel_name": hotel_name,
+            "check_in": check_in,
+            "check_out": check_out,
+            "confirmation": confirmation,
+            "subject": email.get("subject", "")
+        }
+
+    def _parse_tour_email(self, email: Dict) -> Optional[Dict]:
+        """Parse tour/activity confirmation from email"""
+        text = email.get("subject", "") + " " + email.get("body", {}).get("content", "")
+
+        # Extract tour name
+        tour_name = email.get("subject", "").replace("Confirmation", "").replace("Ticket", "").strip()
+
+        # Extract date
+        date_match = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4})', text)
+        tour_date = date_match.group(1) if date_match else ""
+
+        # Extract confirmation
+        conf_match = re.search(r'confirmation[:\s]*([A-Z0-9]{5,})', text, re.IGNORECASE)
+        confirmation = conf_match.group(1) if conf_match else ""
+
+        return {
+            "tour_name": tour_name,
+            "date": tour_date,
+            "confirmation": confirmation,
+            "subject": email.get("subject", "")
+        }
 
 # ============================================
 # TRAVEL DATA CLASSES
@@ -82,7 +282,7 @@ class Tour:
         }
 
 # ============================================
-# SESSION STATE MANAGEMENT
+# SESSION STATE
 # ============================================
 if 'flights' not in st.session_state:
     st.session_state.flights = []
@@ -90,50 +290,100 @@ if 'hotels' not in st.session_state:
     st.session_state.hotels = []
 if 'tours' not in st.session_state:
     st.session_state.tours = []
+if 'outlook_manager' not in st.session_state:
+    st.session_state.outlook_manager = OutlookManager()
 if 'outlook_connected' not in st.session_state:
     st.session_state.outlook_connected = False
 
 # ============================================
-# SIDEBAR - SETTINGS
+# SIDEBAR - OUTLOOK SETTINGS
 # ============================================
 with st.sidebar:
-    st.header("⚙️ Outlook Integration")
+    st.header("📧 Outlook Integration")
 
-    st.info("""
-    **To enable Outlook import:**
+    st.markdown("### Step 1: Enter Client ID")
+    client_id = st.text_input(
+        "Azure Client ID", 
+        type="password",
+        help="Get this from Azure Portal > App Registrations"
+    )
 
-    1. Go to [Azure Portal](https://portal.azure.com)
-    2. Register an app
-    3. Add API permissions: `Mail.Read`
-    4. Get credentials (Client ID, Secret, Tenant ID)
+    if client_id:
+        st.session_state.outlook_manager.configure(client_id)
+        st.success("✅ Client ID configured")
 
-    Contact a developer for full implementation.
-    """)
+    st.markdown("### Step 2: Connect to Outlook")
 
-    # Simple toggle to simulate connection
-    outlook_enabled = st.toggle("Enable Outlook (Coming Soon)")
+    if st.button("🔗 Connect to Outlook", type="primary"):
+        if not client_id:
+            st.error("Please enter Client ID first")
+        else:
+            with st.spinner("Opening login window..."):
+                token = st.session_state.outlook_manager.get_token_interactive()
+                if token:
+                    st.session_state.outlook_manager.access_token = token
+                    st.session_state.outlook_connected = True
+                    st.success("✅ Connected to Outlook!")
+                else:
+                    st.error("Failed to connect")
 
-    if outlook_enabled:
-        st.warning("Outlook integration requires additional setup. Use manual entry for now.")
+    if st.session_state.outlook_connected:
+        st.markdown("### Step 3: Import Emails")
+
+        search_term = st.text_input("Search emails (optional)", placeholder="e.g., flight, hotel")
+
+        if st.button("📥 Import Travel Emails"):
+            with st.spinner("Fetching emails..."):
+                emails = st.session_state.outlook_manager.fetch_emails()
+                if emails:
+                    travel_data = st.session_state.outlook_manager.extract_travel_info(emails)
+
+                    # Add extracted flights
+                    for f in travel_data["flights"]:
+                        st.session_state.flights.append(Flight(
+                            f.get("airline", "Unknown"),
+                            f.get("flight_number", "Unknown"),
+                            "", "",  # departure/arrival
+                            date.today(), time(0,0),
+                            date.today(), time(0,0),
+                            f.get("confirmation", "")
+                        ))
+
+                    # Add extracted hotels
+                    for h in travel_data["hotels"]:
+                        st.session_state.hotels.append(Hotel(
+                            h.get("hotel_name", "Unknown Hotel"),
+                            "",
+                            date.today(), date.today(),
+                            h.get("confirmation", "")
+                        ))
+
+                    # Add extracted tours
+                    for t in travel_data["tours"]:
+                        st.session_state.tours.append(Tour(
+                            t.get("tour_name", "Unknown Tour"),
+                            "",
+                            date.today(), time(0,0),
+                            t.get("confirmation", "")
+                        ))
+
+                    st.success(f"✅ Imported {len(travel_data['flights'])} flights, {len(travel_data['hotels'])} hotels, {len(travel_data['tours'])} tours")
+                else:
+                    st.warning("No emails found")
 
     st.divider()
 
-    # Theme toggle
-    if st.toggle("Dark Mode"):
-        st.markdown("""
-        <style>
-        .stApp {background-color: #1e1e1e; color: white;}
-        </style>
-        """, unsafe_allow_html=True)
+    if st.button("Disconnect Outlook"):
+        st.session_state.outlook_connected = False
+        st.session_state.outlook_manager.access_token = None
+        st.rerun()
 
 # ============================================
 # MAIN TABS
 # ============================================
 tab1, tab2, tab3, tab4 = st.tabs(["✈️ Flights", "🏨 Hotels", "🎯 Tours", "📋 Summary"])
 
-# --------------------------------------------
 # FLIGHTS TAB
-# --------------------------------------------
 with tab1:
     st.header("✈️ Flight Details")
 
@@ -166,7 +416,6 @@ with tab1:
             st.session_state.flights.append(flight)
             st.success(f"✅ Flight {airline} {flight_number} added!")
 
-    # Display flights
     if st.session_state.flights:
         st.subheader(f"📋 {len(st.session_state.flights)} Flight(s)")
         df = pd.DataFrame([f.to_dict() for f in st.session_state.flights])
@@ -176,11 +425,9 @@ with tab1:
             st.session_state.flights = []
             st.rerun()
     else:
-        st.info("No flights added yet. Use the form above to add flights.")
+        st.info("No flights added yet. Add manually or import from Outlook.")
 
-# --------------------------------------------
 # HOTELS TAB
-# --------------------------------------------
 with tab2:
     st.header("🏨 Hotel Details")
 
@@ -212,11 +459,9 @@ with tab2:
             st.session_state.hotels = []
             st.rerun()
     else:
-        st.info("No hotels added yet. Use the form above to add hotels.")
+        st.info("No hotels added yet. Add manually or import from Outlook.")
 
-# --------------------------------------------
 # TOURS TAB
-# --------------------------------------------
 with tab3:
     st.header("🎯 Tour & Activity Details")
 
@@ -248,11 +493,9 @@ with tab3:
             st.session_state.tours = []
             st.rerun()
     else:
-        st.info("No tours added yet. Use the form above to add tours.")
+        st.info("No tours added yet. Add manually or import from Outlook.")
 
-# --------------------------------------------
 # SUMMARY TAB
-# --------------------------------------------
 with tab4:
     st.header("📋 Complete Travel Summary")
 
@@ -267,7 +510,6 @@ with tab4:
 
     st.divider()
 
-    # Flight Summary
     if st.session_state.flights:
         st.subheader("✈️ Flights")
         for i, flight in enumerate(st.session_state.flights, 1):
@@ -278,7 +520,6 @@ with tab4:
                 if flight.confirmation_number:
                     st.write(f"**Confirmation:** {flight.confirmation_number}")
 
-    # Hotel Summary
     if st.session_state.hotels:
         st.subheader("🏨 Hotels")
         for i, hotel in enumerate(st.session_state.hotels, 1):
@@ -289,7 +530,6 @@ with tab4:
                 if hotel.confirmation_number:
                     st.write(f"**Confirmation:** {hotel.confirmation_number}")
 
-    # Tour Summary
     if st.session_state.tours:
         st.subheader("🎯 Tours & Activities")
         for i, tour in enumerate(st.session_state.tours, 1):
@@ -299,45 +539,26 @@ with tab4:
                 if tour.confirmation_number:
                     st.write(f"**Confirmation:** {tour.confirmation_number}")
 
-    # Export option
     st.divider()
     st.subheader("💾 Export Travel Plan")
 
-    col1, col2 = st.columns(2)
+    if st.button("Export to CSV 📊"):
+        all_data = []
+        for f in st.session_state.flights:
+            all_data.append({"Type": "Flight", **f.to_dict()})
+        for h in st.session_state.hotels:
+            all_data.append({"Type": "Hotel", **h.to_dict()})
+        for t in st.session_state.tours:
+            all_data.append({"Type": "Tour", **t.to_dict()})
 
-    with col1:
-        if st.button("Export to CSV 📊"):
-            all_data = []
-            for f in st.session_state.flights:
-                all_data.append({"Type": "Flight", **f.to_dict()})
-            for h in st.session_state.hotels:
-                all_data.append({"Type": "Hotel", **h.to_dict()})
-            for t in st.session_state.tours:
-                all_data.append({"Type": "Tour", **t.to_dict()})
-
-            if all_data:
-                df_export = pd.DataFrame(all_data)
-                csv = df_export.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="Download CSV",
-                    data=csv,
-                    file_name="travel_plan.csv",
-                    mime="text/csv"
-                )
-            else:
-                st.warning("No data to export. Add some travel details first!")
-
-    with col2:
-        if st.button("Save to JSON 📄"):
-            data = {
-                "flights": [f.to_dict() for f in st.session_state.flights],
-                "hotels": [h.to_dict() for h in st.session_state.hotels],
-                "tours": [t.to_dict() for t in st.session_state.tours]
-            }
-            json_str = json.dumps(data, indent=2, default=str)
+        if all_data:
+            df_export = pd.DataFrame(all_data)
+            csv = df_export.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="Download JSON",
-                data=json_str,
-                file_name="travel_plan.json",
-                mime="application/json"
+                label="Download CSV",
+                data=csv,
+                file_name="travel_plan.csv",
+                mime="text/csv"
             )
+        else:
+            st.warning("No data to export!")
