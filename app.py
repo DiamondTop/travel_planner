@@ -1,17 +1,28 @@
 import streamlit as st
+import requests
+import msal
+import pandas as pd
+from datetime import datetime
 
-if accounts:
-    result = app.acquire_token_silent(SCOPES, account=accounts[0])
-else:
-    flow = app.initiate_device_flow(scopes=SCOPES)
-    st.write(flow["message"])
-    result = app.acquire_token_by_device_flow(flow)
+# =============================
+# AUTHENTICATION (MSAL)
+# =============================
+def get_access_token():
+    app = msal.PublicClientApplication(CLIENT_ID, authority=AUTHORITY)
+    accounts = app.get_accounts()
 
-if "access_token" in result:
-    return result["access_token"]
-else:
-    st.error("Authentication failed")
-    return None
+    if accounts:
+        result = app.acquire_token_silent(SCOPES, account=accounts[0])
+    else:
+        flow = app.initiate_device_flow(scopes=SCOPES)
+        st.write(flow["message"])
+        result = app.acquire_token_by_device_flow(flow)
+
+    if "access_token" in result:
+        return result["access_token"]
+    else:
+        st.error("Authentication failed")
+        return None
 
 # =============================
 # FETCH EMAILS FROM OUTLOOK
