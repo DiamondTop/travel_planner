@@ -324,11 +324,11 @@ with tab4:
         # Create combined dataframe
         all_data = []
         for f in st.session_state.flights:
-            all_data.append({"Type": "Flight", **f.to_dict()}
+            all_data.append({"Type": "Flight", **f.to_dict()})
         for h in st.session_state.hotels:
-            all_data.append({"Type": "Hotel", **h.to_dict()}
+            all_data.append({"Type": "Hotel", **h.to_dict()})
         for t in st.session_state.tours:
-            all_data.append({"Type": "Tour", **t.to_dict()}
+            all_data.append({"Type": "Tour", **t.to_dict()})
 
         if all_data:
             df_export = pd.DataFrame(all_data)
