@@ -28,23 +28,35 @@ class OutlookClient:
         self.client_secret = client_secret
         self.tenant_id = tenant_id
         self.settings_configured = False
+        self.client = None
 
     def configure(self):
         """Initialize Outlook API client"""
-        # This is a placeholder - you need to set up proper Azure app registration
-        # and obtain valid credentials
         if not all([self.client_id, self.client_secret, self.tenant_id]):
             return False
 
-        # Code for actual Outlook API connection would go here
-        # Using Microsoft Graph API
-        self.settings_configured = True
-        return True
+        if not GRAPH_SDK_AVAILABLE:
+            st.error("Please install msgraph-sdk: pip install msgraph-sdk azure-identity")
+            return False
+
+        try:
+            # Initialize the Graph client
+            credential = ClientSecretCredential(
+                self.tenant_id,
+                self.client_id,
+                self.client_secret
+            )
+
+            self.client = GraphServiceClient(credential)
+            self.settings_configured = True
+            return True
+        except Exception as e:
+            st.error(f"Failed to connect: {str(e)}")
+            return False
 
     def fetch_emails(self, subject_filter: str = None) -> List[Dict]:
         """Fetch emails from Outlook"""
-        # Placeholder - implement actual API calls to Microsoft Graph
-        # Example: https://docs.microsoft.com/en-us/graph/api/user-list-messages
+        # Placeholder - implement actual API calls
         return []
 
 # ============================================
