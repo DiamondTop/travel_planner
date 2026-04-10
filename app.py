@@ -54,27 +54,35 @@ class OutlookManager:
 
         redirect_uri = "http://localhost:8501/"
         token_url = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
-        
 
+  
         data = {
             "client_id": self.client_id,
             "code": auth_code,
             "redirect_uri": redirect_uri,
-            "grant_type": "authorization_code"
+            "grant_type": "authorization_code",
+            "scope": "Mail.Read User.Read offline_access"  # ← add this
         }
-
+    
         try:
             response = requests.post(token_url, data=data)
+            response_json = response.json()
+            
             if response.status_code == 200:
-                token_data = response.json()
-                self.access_token = token_data.get("access_token")
+                self.access_token = response_json.get("access_token")
                 return True
             else:
-                st.error(f"Token exchange failed: {response.text}")
+                # Show exact error from Microsoft
+                error = response_json.get("error", "unknown")
+                error_desc = response_json.get("error_description", "no description")
+                st.error(f"**Error:** `{error}`")
+                st.error(f"**Details:** {error_desc}")
                 return False
         except Exception as e:
-            st.error(f"Error: {str(e)}")
+            st.error(f"Exception: {str(e)}")
             return False
+
+       
 
     def fetch_emails(self, top: int = 50) -> List[Dict]:
         """Fetch emails from Outlook"""
