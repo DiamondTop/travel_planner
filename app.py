@@ -29,23 +29,25 @@ class OutlookManager:
         self.client_id = client_id
 
     def get_auth_url(self) -> str:
-        """Generate OAuth authorization URL"""
-        if not self.client_id:
-            return None
+    if not self.client_id:
+        return None
 
-        redirect_uri = "http://localhost:8501/"
-        scope = "Mail.Read User.Read offline_access"
+    import base64
+    redirect_uri = "http://localhost:8501/"
+    scope = "Mail.Read User.Read offline_access"
+    # Encode client_id into state param — survives the redirect
+    state = base64.b64encode(self.client_id.encode()).decode()
 
-        
-        auth_url = (
-            f"https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?"
-            f"client_id={self.client_id}&"
-            f"response_type=code&"
-            f"redirect_uri={redirect_uri}&"
-            f"scope={scope}&"
-            f"response_mode=query"
-        )
-        return auth_url
+    auth_url = (
+        f"https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?"
+        f"client_id={self.client_id}&"
+        f"response_type=code&"
+        f"redirect_uri={redirect_uri}&"
+        f"scope={scope}&"
+        f"state={state}&"
+        f"response_mode=query"
+    )
+    return auth_url
 
     def exchange_code_for_token(self, auth_code: str) -> bool:
         """Exchange authorization code for access token"""
@@ -240,20 +242,26 @@ if 'client_id_stored' not in st.session_state:
 # ============================================
 # AUTO-CAPTURE OAUTH CODE FROM REDIRECT URL
 # ============================================
+
+import base64
 query_params = st.query_params
 
 if "code" in query_params and not st.session_state.outlook_connected:
-    # Restore client_id from session state on redirect
-    if st.session_state.client_id_stored:                            # ← ADD
-        st.session_state.outlook_manager.configure(                  # ← ADD
-            st.session_state.client_id_stored)                       # ← ADD
-        
+    # Recover client_id from state param (survives full page reload)
+    if "state" in query_params:
+        try:
+            recovered_client_id = base64.b64decode(query_params["state"]).decode()
+            st.session_state.client_id_stored = recovered_client_id
+            st.session_state.outlook_manager.configure(recovered_client_id)
+        except Exception:
+            st.error("Could not recover client ID from state. Please try again.")
+            st.stop()
+
     auth_code = query_params["code"]
     with st.spinner("Exchanging code for token..."):
         success = st.session_state.outlook_manager.exchange_code_for_token(auth_code)
         if success:
             st.session_state.outlook_connected = True
-            # Clear the code from URL
             st.query_params.clear()
             st.rerun()
         else:
