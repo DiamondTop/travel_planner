@@ -1,7 +1,12 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import microsoft.graph as graph
+# For Microsoft Graph SDK (Outlook/Office 365)
+try:
+    from msgraph import GraphServiceClient
+    GRAPH_SDK_AVAILABLE = True
+except ImportError:
+    GRAPH_SDK_AVAILABLE = False
 import os
 from typing import List, Dict, Optional
 
