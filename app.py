@@ -233,6 +233,8 @@ if 'outlook_manager' not in st.session_state:
     st.session_state.outlook_manager = OutlookManager()
 if 'outlook_connected' not in st.session_state:
     st.session_state.outlook_connected = False
+if 'client_id_stored' not in st.session_state:       
+    st.session_state.client_id_stored = ""               
 
 
 # ============================================
@@ -241,6 +243,11 @@ if 'outlook_connected' not in st.session_state:
 query_params = st.query_params
 
 if "code" in query_params and not st.session_state.outlook_connected:
+    # Restore client_id from session state on redirect
+    if st.session_state.client_id_stored:                            # ← ADD
+        st.session_state.outlook_manager.configure(                  # ← ADD
+            st.session_state.client_id_stored)                       # ← ADD
+        
     auth_code = query_params["code"]
     with st.spinner("Exchanging code for token..."):
         success = st.session_state.outlook_manager.exchange_code_for_token(auth_code)
@@ -267,10 +274,13 @@ with st.sidebar:
     4. Copy your **Client ID**
     """)
 
-    client_id = st.text_input("Azure Client ID", type="password")
+    
+    client_id = st.text_input("Azure Client ID", type="password",
+                           value=st.session_state.client_id_stored)  # ← persist value
 
     if client_id:
-        st.session_state.outlook_manager.configure(client_id)
+    st.session_state.client_id_stored = client_id                    # ← save it
+    st.session_state.outlook_manager.configure(client_id)
 
     # OAuth flow
     st.markdown("### Connect to Outlook")
