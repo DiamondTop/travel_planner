@@ -40,7 +40,35 @@ def fetch_emails(token):
     return data.get("value", [])
 
 
+def extract_travel(email):
+    subject = email.get("subject", "")
+    body = email.get("body", {}).get("content", "")
 
+    prompt = f"""
+    Extract structured travel data from this email.
+
+    Return JSON:
+    type: flight/hotel/activity
+    date:
+    time:
+    location:
+    provider:
+    confirmation:
+
+    Email:
+    {subject}\n{body[:2000]}
+    """
+
+    try:
+        res = client.chat.completions.create(
+            model="gpt-4.1",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return res.choices[0].message.content
+    except Exception as e:
+        return str(e)
+
+    
 # =============================
     prompt = f"""
     Extract structured travel data from this email.
