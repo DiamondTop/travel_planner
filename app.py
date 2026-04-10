@@ -275,12 +275,12 @@ with st.sidebar:
     """)
 
     
-    client_id = st.text_input("Azure Client ID", type="password",
-                           value=st.session_state.client_id_stored)  # ← persist value
+    client_id = st.text_input("Azure Client ID", type="password", value=st.session_state.client_id_stored)  # ← persist value
 
     if client_id:
         st.session_state.client_id_stored = client_id                    # ← save it
         st.session_state.outlook_manager.configure(client_id)
+
 
     # OAuth flow
     st.markdown("### Connect to Outlook")
