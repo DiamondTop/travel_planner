@@ -225,6 +225,25 @@ if 'outlook_manager' not in st.session_state:
 if 'outlook_connected' not in st.session_state:
     st.session_state.outlook_connected = False
 
+
+# ============================================
+# AUTO-CAPTURE OAUTH CODE FROM REDIRECT URL
+# ============================================
+query_params = st.query_params
+
+if "code" in query_params and not st.session_state.outlook_connected:
+    auth_code = query_params["code"]
+    with st.spinner("Exchanging code for token..."):
+        success = st.session_state.outlook_manager.exchange_code_for_token(auth_code)
+        if success:
+            st.session_state.outlook_connected = True
+            # Clear the code from URL
+            st.query_params.clear()
+            st.rerun()
+        else:
+            st.error("Token exchange failed. Try reconnecting.")
+
+
 # ============================================
 # SIDEBAR
 # ============================================
@@ -259,18 +278,9 @@ with st.sidebar:
             else:
                 st.error("Please enter Client ID first")
 
-        # Enter auth code manually
-        auth_code = st.text_input("Enter auth code from URL", type="password")
 
-        if st.button("Exchange for Token"):
-            if auth_code:
-                success = st.session_state.outlook_manager.exchange_code_for_token(auth_code)
-                if success:
-                    st.session_state.outlook_connected = True
-                    st.success("✅ Connected!")
-                    st.rerun()
-            else:
-                st.error("Enter the code from the redirect URL")
+        
+
 
     # Import emails
     if st.session_state.outlook_connected:
