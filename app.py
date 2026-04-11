@@ -30,25 +30,32 @@ class OutlookManager:
         """Store client ID"""
         self.client_id = client_id
 
+
+
+
     def get_auth_url(self) -> str:
         if not self.client_id:
             return None
     
-    	redirect_uri = "http://localhost:8501/"
-    	scope = "Mail.Read User.Read offline_access"
-    	# Encode client_id into state param — survives the redirect
-    	state = base64.b64encode(self.client_id.encode()).decode()
+        redirect_uri = "http://localhost:8501/"
+        scope = "Mail.Read User.Read offline_access"
+    
+        # Encode client_id into state param — survives the redirect
+        state = base64.b64encode(self.client_id.encode()).decode()
+    
+        auth_url = (
+            f"https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?"
+            f"client_id={self.client_id}&"
+            f"response_type=code&"
+            f"redirect_uri={redirect_uri}&"
+            f"scope={scope}&"
+            f"state={state}&"
+            f"response_mode=query"
+        )
+    
+        return auth_url
 
-    	auth_url = (
-        	f"https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?"
-        	f"client_id={self.client_id}&"
-        	f"response_type=code&"
-        	f"redirect_uri={redirect_uri}&"
-        	f"scope={scope}&"
-        	f"state={state}&"
-        	f"response_mode=query"
-    	)
-    	return auth_url
+    
 
     def exchange_code_for_token(self, auth_code: str) -> bool:
         """Exchange authorization code for access token"""
