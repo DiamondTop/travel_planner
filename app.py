@@ -106,16 +106,53 @@ class IMAPManager:
         self.conn = None
 
     def connect(self, provider: str, user_email: str, app_password: str) -> bool:
+        server = IMAP_SERVERS[provider]
         try:
-            server = IMAP_SERVERS[provider]
             self.conn = imaplib.IMAP4_SSL(server, 993)
+        except Exception as e:
+            st.session_state["imap_error"] = (
+                f"Could not reach {server}. Check your internet connection. ({e})"
+            )
+            return False
+
+        # Strip spaces — copy-paste from Gmail often includes spaces in the 16-char code
+        app_password = app_password.replace(" ", "")
+
+        try:
             self.conn.login(user_email, app_password)
             return True
-        except imaplib.IMAP4.error as e:
-            st.session_state["imap_error"] = str(e)
+
+        except imaplib.IMAP4.error:
+            # Build a provider-specific explanation
+            if provider == "Gmail":
+                msg = (
+                    "Gmail login failed. Most likely causes:\n\n"
+                    "① **You used your regular Gmail password** — this won't work. "
+                    "You need an **App Password** (16 letters, no spaces).\n\n"
+                    "② **App Passwords aren't enabled** — you must turn on "
+                    "2-Step Verification first: "
+                    "myaccount.google.com → Security → 2-Step Verification.\n\n"
+                    "③ **IMAP is disabled** in Gmail — go to Gmail → Settings → "
+                    "See all settings → Forwarding and POP/IMAP → Enable IMAP → Save."
+                )
+            else:  # Outlook
+                msg = (
+                    "Outlook login failed. Most likely causes:\n\n"
+                    "① **You used your regular Outlook password** — you need an "
+                    "**App Password** instead.\n\n"
+                    "② **App Passwords aren't available** unless 2-Step Verification "
+                    "is turned on: account.microsoft.com → Security → "
+                    "Advanced security options → Two-step verification.\n\n"
+                    "③ **IMAP is disabled** — in Outlook web, go to Settings → "
+                    "Mail → Sync email → and make sure IMAP is ON.\n\n"
+                    "④ **Microsoft has restricted basic auth** on some accounts. "
+                    "If none of the above works, try the Gmail option instead."
+                )
+            st.session_state["imap_error"] = msg
             return False
+
         except Exception as e:
-            st.session_state["imap_error"] = str(e)
+            st.session_state["imap_error"] = f"Unexpected error: {e}"
             return False
 
     def disconnect(self):
@@ -326,18 +363,31 @@ with st.sidebar:
 
     instructions = {
         "Gmail": (
-            "**Gmail setup (one-time):**\n"
-            "1. Enable **2-Step Verification** in your Google Account\n"
-            "2. Go to **Security → App Passwords**\n"
-            "3. Generate a password for *Mail*\n"
-            "4. Paste the 16-character code below"
+            "**Gmail — 3 things required:**\n\n"
+            "**Step 1 — Enable IMAP**\n"
+            "Gmail → ⚙️ Settings → See all settings → "
+            "Forwarding and POP/IMAP → **Enable IMAP** → Save\n\n"
+            "**Step 2 — Turn on 2-Step Verification**\n"
+            "[myaccount.google.com → Security → 2-Step Verification]"
+            "(https://myaccount.google.com/security)\n\n"
+            "**Step 3 — Create an App Password**\n"
+            "[myaccount.google.com → Security → App Passwords]"
+            "(https://myaccount.google.com/apppasswords) → "
+            "choose *Mail* → Generate\n\n"
+            "⚠️ Paste the **16-letter code** (not your Gmail password)"
         ),
         "Outlook / Hotmail": (
-            "**Outlook setup (one-time):**\n"
-            "1. Go to account.microsoft.com → **Security**\n"
-            "2. Click **Advanced Security Options**\n"
-            "3. Under *App Passwords*, click **Create**\n"
-            "4. Paste the generated password below"
+            "**Outlook — 3 things required:**\n\n"
+            "**Step 1 — Enable IMAP**\n"
+            "Outlook web → Settings → Mail → Sync email → "
+            "**Enable IMAP** access\n\n"
+            "**Step 2 — Turn on 2-Step Verification**\n"
+            "[account.microsoft.com → Security → Advanced security options]"
+            "(https://account.microsoft.com/security) → "
+            "Two-step verification → Turn on\n\n"
+            "**Step 3 — Create an App Password**\n"
+            "Same page → App passwords → **Create a new app password**\n\n"
+            "⚠️ Paste the **generated code** (not your Outlook password)"
         ),
     }
     st.info(instructions[provider])
@@ -347,7 +397,8 @@ with st.sidebar:
                                  placeholder="16-character app password")
 
     if st.session_state.imap_error:
-        st.error(f"🔴 {st.session_state.imap_error}")
+        st.error("🔴 Login failed")
+        st.markdown(st.session_state.imap_error)
 
     col_a, col_b = st.columns(2)
 
